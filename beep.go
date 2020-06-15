@@ -3,7 +3,6 @@ package fxxk
 
 import (
 	"io"
-	"log"
 	"sync"
 	"time"
 
@@ -19,22 +18,14 @@ type RealtimeStream struct {
 	overruns        bool
 	isUnderrun      bool
 
+	target int
+	min    int
+	max    int
+
 	err error
 
 	buffer [][2]float64
 	mutex  *sync.Mutex
-}
-
-func (r *RealtimeStream) targetBuffer() int {
-	return int(r.sampleRate / 13)
-}
-
-func (r *RealtimeStream) minBuffer() int {
-	return int(r.sampleRate / 20)
-}
-
-func (r *RealtimeStream) maxBuffer() int {
-	return int(r.sampleRate / 10)
 }
 
 // Stream(samples [][2]float64) (n int, ok bool)
@@ -61,14 +52,14 @@ func (r *RealtimeStream) pump() {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	for {
-		bufSize := r.maxBuffer() - len(r.buffer)
+		bufSize := r.max - len(r.buffer)
 		overrun := false
-		if len(r.buffer) < r.minBuffer() {
-			bufSize = r.targetBuffer() - len(r.buffer)
+		if len(r.buffer) < r.min {
+			bufSize = r.target - len(r.buffer)
 		}
 
 		if bufSize <= 0 {
-			bufSize = r.minBuffer()
+			bufSize = r.min
 			overrun = true
 		}
 
@@ -99,30 +90,38 @@ func (r *RealtimeStream) pump() {
 	}
 }
 
-func NewRealtimeStream(streamer beep.Streamer, sampleRate beep.SampleRate, overruns bool) *RealtimeStream {
+type BufferConfig struct {
+	Target   time.Duration
+	Min      time.Duration
+	Max      time.Duration
+	Overruns bool
+}
+
+func NewRealtimeStream(streamer beep.Streamer, sampleRate beep.SampleRate, bufferConfig BufferConfig) *RealtimeStream {
 	r := &RealtimeStream{
 		streamer:   streamer,
 		sampleRate: sampleRate,
-		overruns:   overruns,
+		overruns:   bufferConfig.Overruns,
 		mutex:      new(sync.Mutex),
+		target:     sampleRate.N(bufferConfig.Target),
+		min:        sampleRate.N(bufferConfig.Min),
+		max:        sampleRate.N(bufferConfig.Max),
 	}
 	go r.pump()
 	return r
 }
 
 func (r *RealtimeStream) Stream(samples [][2]float64) (n int, ok bool) {
-	// log.Println("hi!")
 	r.mutex.Lock()
-	// log.Println("lock complete")
 	if len(r.buffer) == 0 && r.err != nil {
 		r.mutex.Unlock()
 		return 0, false
 	}
 
 	// got plenty to stream, stream it!
-	if len(r.buffer) > r.minBuffer() {
+	if len(r.buffer) > r.min {
 		r.zeroSamplesSent = 0
-		d := len(r.buffer) - r.minBuffer()
+		d := len(r.buffer) - r.min
 		if len(samples) < d {
 			d = len(samples)
 		}
@@ -137,18 +136,17 @@ func (r *RealtimeStream) Stream(samples [][2]float64) (n int, ok bool) {
 	// nothing to stream, see if there is catch up
 	if !r.isUnderrun {
 		// this is the first time, we can add tolerance, wait until target buffer length.
-		waitTime := r.sampleRate.D(r.targetBuffer()-len(r.buffer)) - time.Since(r.lastRead)
+		waitTime := r.sampleRate.D(r.target-len(r.buffer)) - time.Since(r.lastRead)
 		ds := r.sampleRate.D(len(samples))
 		if ds < waitTime {
 			waitTime = ds
 		}
 
 		r.mutex.Unlock()
-		log.Println("wait time:", waitTime)
 		time.Sleep(waitTime)
 		r.mutex.Lock()
 
-		if len(r.buffer) <= r.minBuffer() {
+		if len(r.buffer) <= r.min {
 			// this is bad!! we've ran out of data
 			r.isUnderrun = true
 		}

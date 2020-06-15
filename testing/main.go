@@ -28,7 +28,12 @@ func main() {
 		return streamer.Stream(samples)
 	})
 
-	st := fxxk.NewRealtimeStream(bpp, format.SampleRate, false)
+	st := fxxk.NewRealtimeStream(bpp, format.SampleRate, fxxk.BufferConfig{
+		Target:   time.Millisecond * 20,
+		Min:      time.Millisecond * 10,
+		Max:      time.Millisecond * 500,
+		Overruns: false,
+	})
 
 	log.Println(speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10)))
 	speaker.Play(st)
