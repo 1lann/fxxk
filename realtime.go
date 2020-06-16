@@ -2,7 +2,6 @@
 package fxxk
 
 import (
-	"io"
 	"sync"
 	"time"
 
@@ -26,26 +25,6 @@ type RealtimeStream struct {
 
 	buffer [][2]float64
 	mutex  *sync.Mutex
-}
-
-// Stream(samples [][2]float64) (n int, ok bool)
-
-func readFull(streamer beep.Streamer, samples [][2]float64) (int, error) {
-	var total int
-	for total < len(samples) {
-		n, ok := streamer.Stream(samples[total:])
-		total += n
-		if !ok {
-			err := streamer.Err()
-			if err != nil {
-				return total, err
-			}
-
-			return total, io.EOF
-		}
-	}
-
-	return total, nil
 }
 
 func (r *RealtimeStream) pump() {
